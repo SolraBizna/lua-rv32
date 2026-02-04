@@ -1,16 +1,11 @@
 #!/usr/bin/env lua5.4
 
-local f = assert(io.open("riscv-fight.bin","rb"))
-local binary = assert(f:read("*a"))
-f:close()
-if #binary % 4 ~= 0 then
-    binary = binary .. ("\0"):rep(4 - #binary % 4)
-end
+local rv32_elf = dofile("../../lib/rv32_elf.53.lua")
+local elf = assert(io.open("riscv-fight.elf","rb"))
 local ram = {}
-for pos=1,#binary,4 do
-    local addr = pos-1
-    ram[addr] = ("<I4"):unpack(binary, pos)
-end
+local entry_point = assert(rv32_elf.load(elf, {write_word = function(addr, value)
+    ram[addr] = value
+end}))
 
 local rv32 = dofile("../../lib/rv32.53.lua")
 -- gross
@@ -53,6 +48,7 @@ function rv32.write_word(cpu, addr, value, mask)
 end
 
 local cpu = rv32.new()
+cpu.pc = entry_point
 while true do
     cpu:run(100)
 end

@@ -78,7 +78,7 @@ for line in text:gmatch("[^\n]*") do
     t[#t+1] = line
     ::continue::
 end
--- part 2 is up to regen.sh
+-- part 2 is up to build.sh
 
 local f = assert(io.open(outpath, "wb"))
 assert(f:write(table.concat(t,"\n")))

@@ -1,4 +1,4 @@
-#!/usr/bin/env lua5.3
+%lua(5.2){#!/usr/bin/env lua5.2}%lua(5.3){#!/usr/bin/env lua5.3}
 
 if #arg ~= 3 then
     print("usage: riscof-dut.lua input.elf output.signature.output rv32i[m][a][c]")

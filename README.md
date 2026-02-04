@@ -54,7 +54,7 @@ Either way, the next step is to create a new CPU:
 local cpu = rv32.new()
 ```
 
-You must, at minimum, implement `read_word` and `write_word` for this CPU. (See "Methods" for more information, or [`test/fight/fight.lua`](test/fight/fight.lua) for a very simple example.) Put a RISC-V program in an accessible region of memory, either by calling `write_word`/`write_byte` yourself or other means. Set `cpu.pc` to the entry point of the RISC-V program. And run!
+You must, at minimum, implement `read_word` and `write_word` for this CPU. (See "Methods" for more information, or [`test/fight/fight.lua`](test/fight/fight.lua) for a very simple example.) Load a valid RISC-V program (see [`LOADING.md`](LOADING.md)), and run!
 
 ## Fields
 
@@ -149,7 +149,7 @@ I wanted to make a RISC-V CPU mod for Factorio, and I took it too far. Hey, at l
 
 Use the prebuilt artifacts in `lib`. Seriously.
 
-If you have Lua 5.2 installed as `lua5.2` and `luac5.2`, and Lua 5.3 installed as `lua5.3` and `luac5.3`, and `emacs` installed with working `lua-mode` (e.g. from `package.el`), and a Bourne-compatible shell, you can run `./regen.sh` to rebuild all the versions from the common source file. Which—
+If you have Lua 5.2 installed as `lua5.2` and `luac5.2`, and Lua 5.3 installed as `lua5.3` and `luac5.3`, and `emacs` installed with working `lua-mode` (e.g. from `package.el`), and a Bourne-compatible shell, you can run `./build.sh` to rebuild all the versions from the common source file. Which—
 
 ## WAIT WHAT IS THIS DEMAC GARBAGE, WHAT HAVE YOU DONE
 

@@ -25,5 +25,5 @@ elseif version == "53" then
         return load(@"rv32.53.lua")()
     end
 else
-    error("Your version of Lua is too old to use RV32. Lua 5.2 or later is required.")
+    error("Your version of Lua is too old to use `rv32`. Lua 5.2 or later is required.")
 end
