@@ -32,7 +32,7 @@ These are balanced so that a degenerate program ought not to be able to unreason
 
 # Usage
 
-Put `rv32.lua` in your module search path. This is a somewhat bulky bundled version that will adapt to whatever Lua version it is loaded into, and will also optionally enable/disable verbose tracing according to the presence of a global named `rv32trace` at load time.
+Put `rv32.lua` in your module search path. This is a somewhat bulky bundled version that will adapt to whatever Lua version it is loaded into, and will also optionally enable/disable verbose tracing according to the presence of a global named `rv32trace` at load time. (See [TRACING.md](TRACING.md) for more information on verbose tracing.)
 
 ```lua
 local rv32 = require "rv32"

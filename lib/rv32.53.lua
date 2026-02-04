@@ -92,6 +92,13 @@ t5:%08X t6:%08X
 
 end
 
+
+
+if rv32trace then
+   (warn or print)("`rv32trace` was set to a non-nil value, but a non-tracing version of `lua-rv32` was loaded! Tracing will NOT take place!")
+end
+
+
 function rv32.new()
    local ret = {
       regs={[0]=0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
@@ -486,7 +493,7 @@ function rv32.run(cpu, num_cycles)
             goto continue
          end
          local opcode = ((((instruction) >> (2))) & (31))
-         --print(opcode)
+         --rv32trace(cpu,opcode)
          --begin machine generated code (sorry)
          if opcode <= 11 then
             if opcode <= 4 then

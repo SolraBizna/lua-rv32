@@ -93,6 +93,38 @@ t5:%08X t6:%08X
 
 end
 
+%trace(){
+if rv32trace == nil or rv32trace == true then
+    if (package.config:sub(1,2) == "/\n" and os.getenv("TERM")) or os.getenv("RV32_FORCE_ANSI") then
+        function rv32trace(cpu, val)
+            if val == true then
+                io.write("\x1B[1m") -- enable bold
+            elseif val == false then
+                io.write("\x1B[0m") -- clear styling
+            else
+                print(val)
+            end
+        end
+    else
+        function rv32trace(cpu, val)
+            if val == true or val == false then
+                -- do nothing, no styling available
+            else
+                print(val)
+            end
+        end
+    end
+elseif rv32trace == false then
+    (warn or print)("`rv32trace` was set to false, but a tracing version of `lua-rv32` was loaded! No tracing will take place, BUT THE PERFORMANCE PRICE OF TRACING WILL STILL BE PAID!")
+    function rv32trace() end
+end
+}
+%notrace(){
+if rv32trace then
+    (warn or print)("`rv32trace` was set to a non-nil value, but a non-tracing version of `lua-rv32` was loaded! Tracing will NOT take place!")
+end
+}
+
 function rv32.new()
     local ret = {
         regs={[0]=0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
@@ -174,11 +206,13 @@ function rv32.run(cpu, num_cycles)
             instruction = orig_instruction
             new_pc = old_pc + 4
             %trace() {
+                rv32trace(cpu,true)
                 if $band(orig_instruction,3) == 3 then
-                    print(("\x1b[1mEXECUTE @ %08X: %08X\x1b[0m"):format(old_pc, orig_instruction))
+                    rv32trace(cpu,("EXECUTE @ %08X: %08X"):format(old_pc, orig_instruction))
                 else
-                    print(("\x1b[1mEXECUTE @ %08X: %04X\x1b[0m"):format(old_pc, $band(orig_instruction,0xFFFF)))
+                    rv32trace(cpu,("EXECUTE @ %08X: %04X"):format(old_pc, $band(orig_instruction,0xFFFF)))
                 end
+                rv32trace(cpu,false)
             }
         else
             if $btest(old_pc,2) then
@@ -200,11 +234,13 @@ function rv32.run(cpu, num_cycles)
                 end
             end
             %trace() {
+                rv32trace(cpu,true)
                 if $band(orig_instruction,3) == 3 then
-                    print(("\x1b[1mEXECUTE @ %08X: %08X\x1b[0m"):format(old_pc, orig_instruction))
+                    rv32trace(cpu,("EXECUTE @ %08X: %08X"):format(old_pc, orig_instruction))
                 else
-                    print(("\x1b[1mEXECUTE @ %08X: %04X\x1b[0m"):format(old_pc, $band(orig_instruction,0xFFFF)))
+                    rv32trace(cpu,("EXECUTE @ %08X: %04X"):format(old_pc, $band(orig_instruction,0xFFFF)))
                 end
+                rv32trace(cpu,false)
             }
             if $band(orig_instruction,3) == 3 then
                 new_pc = old_pc + 4
@@ -222,11 +258,11 @@ function rv32.run(cpu, num_cycles)
                         end
                         local rd = $extract(orig_instruction, 2, 3)+8
                         %trace(){
-                            print(("C.ADDI4SPN rd:%i=%08X offset:%i"):format(rd, cpu.regs[rd], offset))
+                            rv32trace(cpu,("C.ADDI4SPN rd:%i=%08X offset:%i"):format(rd, cpu.regs[rd], offset))
                         }
                         cpu.regs[rd] = $band(cpu.regs[2]+offset, $bnot(0))
                         %trace(){
-                            print("r%i := %08X", rd, cpu.regs[rd])
+                            rv32trace(cpu,"r%i := %08X", rd, cpu.regs[rd])
                         }
                         valid_instruction = true
                         goto instruction_legality_determined
@@ -237,7 +273,7 @@ function rv32.run(cpu, num_cycles)
                         local rs1 = $extract(orig_instruction, 7, 3)+8
                         local rd = $extract(orig_instruction, 2, 3)+8
                         %trace(){
-                            print(("C.LW rd:%i rs1:%i offset:%i"):format(rd, rs1, offset))
+                            rv32trace(cpu,("C.LW rd:%i rs1:%i offset:%i"):format(rd, rs1, offset))
                         }
                         instruction = $assemble(0x2003, rs1->15, rd->7, offset->20)
                     }
@@ -247,7 +283,7 @@ function rv32.run(cpu, num_cycles)
                         local rs1 = $extract(orig_instruction, 7, 3)+8
                         local rs2 = $extract(orig_instruction, 2, 3)+8
                         %trace(){
-                            print(("C.SW rs1:%i rs2:%i offset:%i"):format(rs1, rs2, offset))
+                            rv32trace(cpu,("C.SW rs1:%i rs2:%i offset:%i"):format(rs1, rs2, offset))
                         }
                         instruction = $assemble(0x2023, rs1->15, rs2->20, $rshift(offset,5)->25, $band(offset,31)->7)
                     }
@@ -256,12 +292,12 @@ function rv32.run(cpu, num_cycles)
                         local rd = $extract(orig_instruction, 7, 5)
                         local imm = $disassemble(orig_instruction, ~12..12->5, 6..2->0)
                         %trace(){
-                            print(("C.ADDI rd:%i=%08X imm:%08X"):format(rd, cpu.regs[rd], imm))
+                            rv32trace(cpu,("C.ADDI rd:%i=%08X imm:%08X"):format(rd, cpu.regs[rd], imm))
                         }
                         if rd ~= 0 then
                             cpu.regs[rd] = $band(cpu.regs[rd]+imm, $bnot(0))
                             %trace(){
-                                print(("r%i := %08X"):format(rd, cpu.regs[rd]))
+                                rv32trace(cpu,("r%i := %08X"):format(rd, cpu.regs[rd]))
                             }
                         end
                         valid_instruction = true
@@ -275,8 +311,8 @@ function rv32.run(cpu, num_cycles)
                         cpu.regs[1] = new_pc
                         local target = $band(old_pc + imm, $bnot(0))
                         %trace(){
-                            print(("C.JAL imm:%i"):format(imm))
-                            print(("pc := %08X"):format(target))
+                            rv32trace(cpu,("C.JAL imm:%i"):format(imm))
+                            rv32trace(cpu,("pc := %08X"):format(target))
                         }
                         -- we're in C mode so the PC can't misalign
                         new_pc = target
@@ -288,12 +324,12 @@ function rv32.run(cpu, num_cycles)
                         local imm = $disassemble(orig_instruction, ~12..12->5, 6..2->0)
                         local rd = $extract(orig_instruction, 7, 5)
                         %trace(){
-                            print(("C.LI rd:%i imm:%i"):format(rd, imm))
+                            rv32trace(cpu,("C.LI rd:%i imm:%i"):format(rd, imm))
                         }
                         if rd ~= 0 then
                             cpu.regs[rd] = imm
                             %trace(){
-                                print(("r%i := %08X"):format(rd, cpu.regs[rd]))
+                                rv32trace(cpu,("r%i := %08X"):format(rd, cpu.regs[rd]))
                             }
                         end
                         valid_instruction = true
@@ -305,12 +341,12 @@ function rv32.run(cpu, num_cycles)
                             -- C.ADDI16SP!!!
                             local imm = $disassemble(orig_instruction, ~12..12->9, 6..6->4, 5..5->6, 4..3->7, 2..2->5)
                             %trace(){
-                                print(("C.ADDI16SP imm:%i"):format(imm))
-                                print(("r2 == %08X"):format(cpu.regs[2]))
+                                rv32trace(cpu,("C.ADDI16SP imm:%i"):format(imm))
+                                rv32trace(cpu,("r2 == %08X"):format(cpu.regs[2]))
                             }
                             cpu.regs[2] = $band(cpu.regs[2] + imm, $bnot(0))
                             %trace(){
-                                print(("r2 := %08X"):format(cpu.regs[2]))
+                                rv32trace(cpu,("r2 := %08X"):format(cpu.regs[2]))
                             }
                             valid_instruction = true
                             goto instruction_legality_determined
@@ -322,12 +358,12 @@ function rv32.run(cpu, num_cycles)
                                 goto instruction_legality_determined
                             end
                             %trace(){
-                                print(("C.LUI rd:%i imm:%i"):format(rd, imm))
+                                rv32trace(cpu,("C.LUI rd:%i imm:%i"):format(rd, imm))
                             }
                             if rd ~= 0 then
                                 cpu.regs[rd] = imm
                                 %trace(){
-                                    print(("r%i := %08X"):format(rd, cpu.regs[rd]))
+                                    rv32trace(cpu,("r%i := %08X"):format(rd, cpu.regs[rd]))
                                 }
                             end
                             valid_instruction = true
@@ -346,11 +382,11 @@ function rv32.run(cpu, num_cycles)
                                 end
                                 local amt = $extract(orig_instruction, 2, 5)
                                 %trace(){
-                                    print(("C.SRLI rd:%i=%08X shamt:%i"):format(rd, cpu.regs[rd], amt))
+                                    rv32trace(cpu,("C.SRLI rd:%i=%08X shamt:%i"):format(rd, cpu.regs[rd], amt))
                                 }
                                 cpu.regs[rd] = $rshift(cpu.regs[rd], amt)
                                 %trace() {
-                                    print(("r%i := %08X"):format(rd, cpu.regs[rd]))
+                                    rv32trace(cpu,("r%i := %08X"):format(rd, cpu.regs[rd]))
                                 }
                                 valid_instruction = true
                                 goto instruction_legality_determined
@@ -362,11 +398,11 @@ function rv32.run(cpu, num_cycles)
                                 end
                                 local amt = $extract(orig_instruction, 2, 5)
                                 %trace(){
-                                    print(("C.SRAI rd:%i=%08X shamt:%i"):format(rd, cpu.regs[rd], amt))
+                                    rv32trace(cpu,("C.SRAI rd:%i=%08X shamt:%i"):format(rd, cpu.regs[rd], amt))
                                 }
                                 cpu.regs[rd] = $arshift(cpu.regs[rd], amt)
                                 %trace() {
-                                    print(("r%i := %08X"):format(rd, cpu.regs[rd]))
+                                    rv32trace(cpu,("r%i := %08X"):format(rd, cpu.regs[rd]))
                                 }
                                 valid_instruction = true
                                 goto instruction_legality_determined
@@ -375,11 +411,11 @@ function rv32.run(cpu, num_cycles)
                                 -- ANDI
                                 local imm = $disassemble(orig_instruction, ~12..12->5, 6..2->0)
                                 %trace(){
-                                    print(("C.ANDI rd:%i=%08X imm=%08X"):format(rd, cpu.regs[rd], imm))
+                                    rv32trace(cpu,("C.ANDI rd:%i=%08X imm=%08X"):format(rd, cpu.regs[rd], imm))
                                 }
                                 cpu.regs[rd] = $band(cpu.regs[rd], imm)
                                 %trace(){
-                                    print(("r%i := %08X"):format(rd, cpu.regs[rd]))
+                                    rv32trace(cpu,("r%i := %08X"):format(rd, cpu.regs[rd]))
                                 }
                                 valid_instruction = true
                                 goto instruction_legality_determined
@@ -389,7 +425,7 @@ function rv32.run(cpu, num_cycles)
                                 local op = $extract(orig_instruction, 5, 2)
                                 local rs2 = $extract(orig_instruction, 2, 3)+8
                                 %trace(){
-                                    print(("C.OP rd:%i=%08X rs2:%i=%08X op:%i"):format(rd, cpu.regs[rd], rs2, cpu.regs[rs2], op))
+                                    rv32trace(cpu,("C.OP rd:%i=%08X rs2:%i=%08X op:%i"):format(rd, cpu.regs[rd], rs2, cpu.regs[rs2], op))
                                 }
                                 %select(op){
                                     0 => {
@@ -410,7 +446,7 @@ function rv32.run(cpu, num_cycles)
                                     }
                                 }
                                 %trace(){
-                                    print(("r%i := %08X"):format(rd, cpu.regs[rd]))
+                                    rv32trace(cpu,("r%i := %08X"):format(rd, cpu.regs[rd]))
                                 }
                                 valid_instruction = true
                                 goto instruction_legality_determined
@@ -422,8 +458,8 @@ function rv32.run(cpu, num_cycles)
                         local imm = $disassemble(orig_instruction, ~12..12->11, 11..11->4, 10..9->8, 8..8->10, 7..7->6, 6..6->7, 5..3->1, 2..2->5)
                         local target = $band(old_pc + imm, $bnot(1))
                         %trace(){
-                            print(("C.J imm=%08X"):format(imm))
-                            print(("pc := %08X"):format(target))
+                            rv32trace(cpu,("C.J imm=%08X"):format(imm))
+                            rv32trace(cpu,("pc := %08X"):format(target))
                         }
                         -- we're in C mode so the PC can't misalign
                         new_pc = target
@@ -435,7 +471,7 @@ function rv32.run(cpu, num_cycles)
                         local rs1 = $extract(orig_instruction, 7, 3)+8
                         %trace(){
                             local target = $band(old_pc + $disassemble(orig_instruction, ~12..12->8, 11..10->3, 6..5->6, 4..3->1, 2..2->5), $bnot(1))
-                            print(("C.BEQZ rs1=%i:%08X target=%08X"):format(rs1, cpu.regs[rs1], target))
+                            rv32trace(cpu,("C.BEQZ rs1=%i:%08X target=%08X"):format(rs1, cpu.regs[rs1], target))
                         }
                         if cpu.regs[rs1] == 0 then
                             local offset = $disassemble(orig_instruction, ~12..12->8, 11..10->3, 6..5->6, 4..3->1, 2..2->5)
@@ -450,7 +486,7 @@ function rv32.run(cpu, num_cycles)
                         local rs1 = $extract(orig_instruction, 7, 3)+8
                         %trace(){
                             local target = $band(old_pc + $disassemble(orig_instruction, ~12..12->8, 11..10->3, 6..5->6, 4..3->1, 2..2->5), $bnot(1))
-                            print(("C.BNEZ rs1=%i:%08X target=%08X"):format(rs1, cpu.regs[rs1], target))
+                            rv32trace(cpu,("C.BNEZ rs1=%i:%08X target=%08X"):format(rs1, cpu.regs[rs1], target))
                         }
                         if cpu.regs[rs1] ~= 0 then
                             local offset = $disassemble(orig_instruction, ~12..12->8, 11..10->3, 6..5->6, 4..3->1, 2..2->5)
@@ -468,11 +504,11 @@ function rv32.run(cpu, num_cycles)
                         local amt = $extract(orig_instruction, 2, 5)
                         local rd = $extract(orig_instruction, 7, 5)
                         %trace(){
-                            print(("C.SLLI rd:%i=%08X amt=%i"):format(rd, cpu.regs[rd], amt))
+                            rv32trace(cpu,("C.SLLI rd:%i=%08X amt=%i"):format(rd, cpu.regs[rd], amt))
                         }
                         cpu.regs[rd] = $lshift(cpu.regs[rd], amt)
                         %trace(){
-                            print(("r%i := %08X"):format(rd, cpu.regs[rd]))
+                            rv32trace(cpu,("r%i := %08X"):format(rd, cpu.regs[rd]))
                         }
                         valid_instruction = true
                         goto instruction_legality_determined
@@ -486,7 +522,7 @@ function rv32.run(cpu, num_cycles)
                         local offset = $disassemble(orig_instruction, 12..12->5, 6..4->2, 3..2->6)
                         instruction = $assemble(0x2003, offset->20, rd->7, 2->15)
                         %trace(){
-                            print(("C.LWSP rd=%i offset=%i"):format(rd, offset))
+                            rv32trace(cpu,("C.LWSP rd=%i offset=%i"):format(rd, offset))
                         }
                     }
                     26 => {
@@ -495,7 +531,7 @@ function rv32.run(cpu, num_cycles)
                         local offset = $disassemble(orig_instruction, 12..9->2, 8..7->6)
                         instruction = $assemble(0x2023, rd->20, 2->15, $rshift(offset,5)->25, $band(offset,31)->7)
                         %trace(){
-                            print(("C.SWSP rd=%i offset=%i"):format(rd, offset))
+                            rv32trace(cpu,("C.SWSP rd=%i offset=%i"):format(rd, offset))
                         }
                     }
                     18 => {
@@ -510,7 +546,7 @@ function rv32.run(cpu, num_cycles)
                                     goto instruction_legality_determined
                                 end
                                 %trace(){
-                                    print(("C.JR rs1=%i:%08X"):format(rs1, cpu.regs[rs1]))
+                                    rv32trace(cpu,("C.JR rs1=%i:%08X"):format(rs1, cpu.regs[rs1]))
                                 }
                                 new_pc = $band(cpu.regs[rs1],$bnot(1))
                                 -- we're in C mode so the PC can't misalign
@@ -518,12 +554,12 @@ function rv32.run(cpu, num_cycles)
                                 -- C.MV
                                 -- rs2 cannot be zero
                                 %trace(){
-                                    print(("C.MV rd=%i rs2=%i:%08X"):format(rs1, rs2, cpu.regs[rs2]))
+                                    rv32trace(cpu,("C.MV rd=%i rs2=%i:%08X"):format(rs1, rs2, cpu.regs[rs2]))
                                 }
                                 if rs1 ~= 0 then
                                     cpu.regs[rs1] = cpu.regs[rs2]
                                     %trace(){
-                                        print(("r%i := %08X"):format(rs1, cpu.regs[rs1]))
+                                        rv32trace(cpu,("r%i := %08X"):format(rs1, cpu.regs[rs1]))
                                     }
                                 end
                             end
@@ -534,13 +570,13 @@ function rv32.run(cpu, num_cycles)
                                 -- C.EBREAK
                                 instruction = 0x8003B
                                 %trace(){
-                                    print("C.EBREAK")
+                                    rv32trace(cpu,"C.EBREAK")
                                 }
                             else
                                 -- C.JALR
                                 local destination = cpu.regs[rs1]
                                 %trace(){
-                                    print(("C.JALR rs1:%i=%08X"):format(rs1, destination))
+                                    rv32trace(cpu,("C.JALR rs1:%i=%08X"):format(rs1, destination))
                                 }
                                 cpu.regs[1] = new_pc
                                 new_pc = $band(destination,$bnot(1))
@@ -551,7 +587,7 @@ function rv32.run(cpu, num_cycles)
                         else
                             -- C.ADD
                             %trace(){
-                                print(("C.ADD rs1:%i=%08X rs2:%i=%08X"):format(rs1, cpu.regs[rs1], rs2, cpu.regs[rs2]))
+                                rv32trace(cpu,("C.ADD rs1:%i=%08X rs2:%i=%08X"):format(rs1, cpu.regs[rs1], rs2, cpu.regs[rs2]))
                             }
                             instruction = $assemble(0x33, rs1->7, rs1->15, rs2->20)
                         end
@@ -569,7 +605,7 @@ function rv32.run(cpu, num_cycles)
             goto continue
         end
         local opcode = $extract(instruction, 2, 5)
-        --print(opcode)
+        --rv32trace(cpu,opcode)
         %select(opcode){
             0 => {
 -- load
@@ -580,7 +616,7 @@ local imm = $immI(instruction)
 local funct3 = $funct3(instruction)
 local addr = $band(cpu.regs[rs1] + imm, 0xFFFFFFFF)
 %trace() {
-print(("LOAD rs1:%i=%08X imm:%08X funct3:%i addr:%08X"):format(rs1, cpu.regs[rs1], $band(imm,0xFFFFFFFF), funct3, addr))
+rv32trace(cpu,("LOAD rs1:%i=%08X imm:%08X funct3:%i addr:%08X"):format(rs1, cpu.regs[rs1], $band(imm,0xFFFFFFFF), funct3, addr))
 }
 local result
 %select(funct3){
@@ -622,7 +658,7 @@ end
 if result ~= nil then
     local rd = $rd(instruction)
     %trace() {
-        print(("r%i := %08X"):format(rd, result))
+        rv32trace(cpu,("r%i := %08X"):format(rd, result))
     }
     if rd ~= 0 then cpu.regs[rd] = result end
     valid_instruction = true
@@ -653,7 +689,7 @@ local result
 local funct3 = $funct3(instruction)
 local rd = $rd(instruction)
 %trace(){
-print(("OP-I rd:%i rs1:%i=%08X imm:%08X funct3:%i"):format(rd, rs1, a, $band(b,0xFFFFFFFF), funct3))
+rv32trace(cpu,("OP-I rd:%i rs1:%i=%08X imm:%08X funct3:%i"):format(rd, rs1, a, $band(b,0xFFFFFFFF), funct3))
 }
 %select(funct3){
     0 => {
@@ -700,7 +736,7 @@ print(("OP-I rd:%i rs1:%i=%08X imm:%08X funct3:%i"):format(rd, rs1, a, $band(b,0
 }
 if result ~= nil then
     %trace(){
-        print(("r%i := %08X"):format(rd, result))
+        rv32trace(cpu,("r%i := %08X"):format(rd, result))
     }
     if rd ~= 0 then cpu.regs[rd] = result end
     valid_instruction = true
@@ -711,7 +747,7 @@ end
 local rd = $rd(instruction)
 local ui = $band(instruction,$bnot(0xFFF))
 %trace(){
-print(("AUIPC r%i := pc + %08X"):format(rd, $band(ui,0xFFFFFFFF)))
+rv32trace(cpu,("AUIPC r%i := pc + %08X"):format(rd, $band(ui,0xFFFFFFFF)))
 }
 if rd ~= 0 then
     cpu.regs[rd] = $band(old_pc + ui, 0xFFFFFFFF)
@@ -731,7 +767,7 @@ local imm = $immS(instruction)
 local funct3 = $funct3(instruction)
 local addr = $band(cpu.regs[rs1] + imm, 0xFFFFFFFF)
 %trace() {
-print(("STORE rs1:%i=%08X rs2:%i=%08X imm:%08X funct3:%i addr:%08X"):format(rs1, cpu.regs[rs1], rs2, cpu.regs[rs2], $band(imm,0xFFFFFFFF), funct3, addr))
+rv32trace(cpu,("STORE rs1:%i=%08X rs2:%i=%08X imm:%08X funct3:%i addr:%08X"):format(rs1, cpu.regs[rs1], rs2, cpu.regs[rs2], $band(imm,0xFFFFFFFF), funct3, addr))
 }
 %select(funct3){
     0 => {
@@ -878,7 +914,7 @@ local funct3 = $funct3(instruction)
 local funct7 = $funct7(instruction)
 local rd = $rd(instruction)
 %trace(){
-print(("OP rd:%i rs1:%i=%08X rs2:%i=%08X funct3:%i funct7:%i"):format(rd, rs1, a, rs2, b, funct3, funct7))
+rv32trace(cpu,("OP rd:%i rs1:%i=%08X rs2:%i=%08X funct3:%i funct7:%i"):format(rd, rs1, a, rs2, b, funct3, funct7))
 }
 local funct37 = $bor($lshift(funct7,3),funct3)
 %select(funct37){
@@ -1124,7 +1160,7 @@ local funct37 = $bor($lshift(funct7,3),funct3)
 }
 if result ~= nil then
     %trace(){
-        print(("r%i := %08X"):format(rd, result))
+        rv32trace(cpu,("r%i := %08X"):format(rd, result))
     }
     if rd ~= 0 then cpu.regs[rd] = result end
     valid_instruction = true
@@ -1135,7 +1171,7 @@ end
 local rd = $rd(instruction)
 local ui = $band(instruction,$bnot(0xFFF))
 %trace(){
-print(("LUI r%i := %08X"):format(rd, $band(ui,0xFFFFFFFF)))
+rv32trace(cpu,("LUI r%i := %08X"):format(rd, $band(ui,0xFFFFFFFF)))
 }
 if rd ~= 0 then
     cpu.regs[rd] = ui
@@ -1161,7 +1197,7 @@ local b = cpu.regs[rs2]
 local funct3 = $funct3(instruction)
 local should_branch
 %trace(){
-print(("BRANCH rs1:%i=%08X rs2:%i=%08X funct3:%i imm:%08X"):format(rs1, a, rs2, b, funct3, $immB(instruction)))
+rv32trace(cpu,("BRANCH rs1:%i=%08X rs2:%i=%08X funct3:%i imm:%08X"):format(rs1, a, rs2, b, funct3, $immB(instruction)))
 }
 %select(funct3){
     0 => { should_branch = a == b }
@@ -1189,7 +1225,7 @@ local rd = $rd(instruction)
 local rs1 = $rs1(instruction)
 local imm = $immI(instruction)
 %trace(){
-print(("JALR r%i := %08X, rs1:%i=%08X, imm=%08X"):format(rd, cpu.pc, rs1, cpu.regs[rs1], imm))
+rv32trace(cpu,("JALR r%i := %08X, rs1:%i=%08X, imm=%08X"):format(rd, cpu.pc, rs1, cpu.regs[rs1], imm))
 }
 local target=$band(cpu.regs[rs1]+imm,$bnot(1))
 if rd ~= 0 then
@@ -1208,7 +1244,7 @@ valid_instruction = true
 -- jal = jump and link
 local rd = $rd(instruction)
 local imm = $immJ(instruction)%trace(){
-print(("JAL r%i := %08X, imm=%08X"):format(rd, cpu.pc, imm))
+rv32trace(cpu,("JAL r%i := %08X, imm=%08X"):format(rd, cpu.pc, imm))
 }
 if rd ~= 0 then
     cpu.regs[rd] = new_pc
@@ -1264,7 +1300,7 @@ valid_instruction = true
                         6 => { name,rs1name,rs1format = "CSRRSI","imm","%i" }
                         7 => { name,rs1name,rs1format = "CSRRCI","imm","%i" }
                     }
-                    print(("%s csr:%i rd:%i %s:"..rs1format):format(name, csr, rd, rs1name, rs1, cpu.regs[rs1]))
+                    rv32trace(cpu,("%s csr:%i rd:%i %s:"..rs1format):format(name, csr, rd, rs1name, rs1, cpu.regs[rs1]))
                 }
                 local wvalue
                 if funct3 >= 4 then
@@ -1315,7 +1351,7 @@ valid_instruction = true
                 if rd ~= 0 and valid_instruction then
                     cpu.regs[rd] = rvalue
                     %trace(){
-                        print(("r%i := %08X"):format(rd, cpu.regs[rd]))
+                        rv32trace(cpu,("r%i := %08X"):format(rd, cpu.regs[rd]))
                     }
                 end
             }

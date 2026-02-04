@@ -42,6 +42,10 @@ function ret.block.trace(block)
     return ""
 end
 
+function ret.block.notrace(block)
+    return block
+end
+
 function ret.arg.assemble(...)
     local ret = {}
     for _,el in ipairs{...} do

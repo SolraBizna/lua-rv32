@@ -92,6 +92,34 @@ t5:%08X t6:%08X
 
 end
 
+
+if rv32trace == nil or rv32trace == true then
+   if (package.config:sub(1,2) == "/\n" and os.getenv("TERM")) or os.getenv("RV32_FORCE_ANSI") then
+      function rv32trace(cpu, val)
+         if val == true then
+            io.write("\x1B[1m") -- enable bold
+         elseif val == false then
+            io.write("\x1B[0m") -- clear styling
+         else
+            print(val)
+         end
+      end
+   else
+      function rv32trace(cpu, val)
+         if val == true or val == false then
+            -- do nothing, no styling available
+         else
+            print(val)
+         end
+      end
+   end
+elseif rv32trace == false then
+   (warn or print)("`rv32trace` was set to false, but a tracing version of `lua-rv32` was loaded! No tracing will take place, BUT THE PERFORMANCE PRICE OF TRACING WILL STILL BE PAID!")
+   function rv32trace() end
+end
+
+
+
 function rv32.new()
    local ret = {
       regs={[0]=0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
@@ -172,11 +200,13 @@ function rv32.run(cpu, num_cycles)
             end
             instruction = orig_instruction
             new_pc = old_pc + 4
+            rv32trace(cpu,true)
             if bit32.band(orig_instruction,3) == 3 then
-               print(("\x1b[1mEXECUTE @ %08X: %08X\x1b[0m"):format(old_pc, orig_instruction))
+               rv32trace(cpu,("EXECUTE @ %08X: %08X"):format(old_pc, orig_instruction))
             else
-               print(("\x1b[1mEXECUTE @ %08X: %04X\x1b[0m"):format(old_pc, bit32.band(orig_instruction,0xFFFF)))
+               rv32trace(cpu,("EXECUTE @ %08X: %04X"):format(old_pc, bit32.band(orig_instruction,0xFFFF)))
             end
+            rv32trace(cpu,false)
          else
             if bit32.btest(old_pc,2) then
                orig_instruction = cpu:read_halfword(old_pc, 1)
@@ -196,11 +226,13 @@ function rv32.run(cpu, num_cycles)
                   goto continue
                end
             end
+            rv32trace(cpu,true)
             if bit32.band(orig_instruction,3) == 3 then
-               print(("\x1b[1mEXECUTE @ %08X: %08X\x1b[0m"):format(old_pc, orig_instruction))
+               rv32trace(cpu,("EXECUTE @ %08X: %08X"):format(old_pc, orig_instruction))
             else
-               print(("\x1b[1mEXECUTE @ %08X: %04X\x1b[0m"):format(old_pc, bit32.band(orig_instruction,0xFFFF)))
+               rv32trace(cpu,("EXECUTE @ %08X: %04X"):format(old_pc, bit32.band(orig_instruction,0xFFFF)))
             end
+            rv32trace(cpu,false)
             if bit32.band(orig_instruction,3) == 3 then
                new_pc = old_pc + 4
                instruction = orig_instruction
@@ -219,9 +251,9 @@ function rv32.run(cpu, num_cycles)
                               goto instruction_legality_determined
                            end
                            local rd = bit32.band(bit32.rshift(orig_instruction,2),7)+8
-                           print(("C.ADDI4SPN rd:%i=%08X offset:%i"):format(rd, cpu.regs[rd], offset))
+                           rv32trace(cpu,("C.ADDI4SPN rd:%i=%08X offset:%i"):format(rd, cpu.regs[rd], offset))
                            cpu.regs[rd] = bit32.band(cpu.regs[2]+offset,4294967295)
-                           print("r%i := %08X", rd, cpu.regs[rd])
+                           rv32trace(cpu,"r%i := %08X", rd, cpu.regs[rd])
                            valid_instruction = true
                            goto instruction_legality_determined
                         end
@@ -230,10 +262,10 @@ function rv32.run(cpu, num_cycles)
                            -- C.ADDI
                            local rd = bit32.band(bit32.rshift(orig_instruction,7),31)
                            local imm = bit32.bor(bit32.btest(orig_instruction,4096) and 0xFFFFFFE0 or 0,bit32.lshift(bit32.band(bit32.rshift(orig_instruction,12),1),5),bit32.band(bit32.rshift(orig_instruction,2),31))
-                           print(("C.ADDI rd:%i=%08X imm:%08X"):format(rd, cpu.regs[rd], imm))
+                           rv32trace(cpu,("C.ADDI rd:%i=%08X imm:%08X"):format(rd, cpu.regs[rd], imm))
                            if rd ~= 0 then
                               cpu.regs[rd] = bit32.band(cpu.regs[rd]+imm,4294967295)
-                              print(("r%i := %08X"):format(rd, cpu.regs[rd]))
+                              rv32trace(cpu,("r%i := %08X"):format(rd, cpu.regs[rd]))
                            end
                            valid_instruction = true
                            goto instruction_legality_determined
@@ -244,9 +276,9 @@ function rv32.run(cpu, num_cycles)
                            end
                            local amt = bit32.band(bit32.rshift(orig_instruction,2),31)
                            local rd = bit32.band(bit32.rshift(orig_instruction,7),31)
-                           print(("C.SLLI rd:%i=%08X amt=%i"):format(rd, cpu.regs[rd], amt))
+                           rv32trace(cpu,("C.SLLI rd:%i=%08X amt=%i"):format(rd, cpu.regs[rd], amt))
                            cpu.regs[rd] = bit32.lshift(cpu.regs[rd],amt)
-                           print(("r%i := %08X"):format(rd, cpu.regs[rd]))
+                           rv32trace(cpu,("r%i := %08X"):format(rd, cpu.regs[rd]))
                            valid_instruction = true
                            goto instruction_legality_determined
                         end
@@ -261,8 +293,8 @@ function rv32.run(cpu, num_cycles)
                               local imm = bit32.bor(bit32.btest(orig_instruction,4096) and 0xFFFFF800 or 0,bit32.lshift(bit32.band(bit32.rshift(orig_instruction,12),1),11),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,11),1),4),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,9),3),8),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,8),1),10),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,7),1),6),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,6),1),7),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,3),7),1),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,2),1),5))
                               cpu.regs[1] = new_pc
                               local target = bit32.band(old_pc + imm,4294967295)
-                              print(("C.JAL imm:%i"):format(imm))
-                              print(("pc := %08X"):format(target))
+                              rv32trace(cpu,("C.JAL imm:%i"):format(imm))
+                              rv32trace(cpu,("pc := %08X"):format(target))
                               -- we're in C mode so the PC can't misalign
                               new_pc = target
                               valid_instruction = true
@@ -274,7 +306,7 @@ function rv32.run(cpu, num_cycles)
                               local offset = bit32.bor(bit32.lshift(bit32.band(bit32.rshift(orig_instruction,10),7),3),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,6),1),2),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,5),1),6))
                               local rs1 = bit32.band(bit32.rshift(orig_instruction,7),7)+8
                               local rd = bit32.band(bit32.rshift(orig_instruction,2),7)+8
-                              print(("C.LW rd:%i rs1:%i offset:%i"):format(rd, rs1, offset))
+                              rv32trace(cpu,("C.LW rd:%i rs1:%i offset:%i"):format(rd, rs1, offset))
                               instruction = bit32.bor(0x2003,bit32.lshift(rs1,15),bit32.lshift(rd,7),bit32.lshift(offset,20))
                            end
                         end
@@ -283,10 +315,10 @@ function rv32.run(cpu, num_cycles)
                            -- C.LI
                            local imm = bit32.bor(bit32.btest(orig_instruction,4096) and 0xFFFFFFE0 or 0,bit32.lshift(bit32.band(bit32.rshift(orig_instruction,12),1),5),bit32.band(bit32.rshift(orig_instruction,2),31))
                            local rd = bit32.band(bit32.rshift(orig_instruction,7),31)
-                           print(("C.LI rd:%i imm:%i"):format(rd, imm))
+                           rv32trace(cpu,("C.LI rd:%i imm:%i"):format(rd, imm))
                            if rd ~= 0 then
                               cpu.regs[rd] = imm
-                              print(("r%i := %08X"):format(rd, cpu.regs[rd]))
+                              rv32trace(cpu,("r%i := %08X"):format(rd, cpu.regs[rd]))
                            end
                            valid_instruction = true
                            goto instruction_legality_determined
@@ -298,7 +330,7 @@ function rv32.run(cpu, num_cycles)
                            end
                            local offset = bit32.bor(bit32.lshift(bit32.band(bit32.rshift(orig_instruction,12),1),5),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,4),7),2),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,2),3),6))
                            instruction = bit32.bor(0x2003,bit32.lshift(offset,20),bit32.lshift(rd,7),bit32.lshift(2,15))
-                           print(("C.LWSP rd=%i offset=%i"):format(rd, offset))
+                           rv32trace(cpu,("C.LWSP rd=%i offset=%i"):format(rd, offset))
                         end
                      end
                   end
@@ -311,10 +343,10 @@ function rv32.run(cpu, num_cycles)
                               if rd == 2 then
                                  -- C.ADDI16SP!!!
                                  local imm = bit32.bor(bit32.btest(orig_instruction,4096) and 0xFFFFFE00 or 0,bit32.lshift(bit32.band(bit32.rshift(orig_instruction,12),1),9),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,6),1),4),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,5),1),6),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,3),3),7),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,2),1),5))
-                                 print(("C.ADDI16SP imm:%i"):format(imm))
-                                 print(("r2 == %08X"):format(cpu.regs[2]))
+                                 rv32trace(cpu,("C.ADDI16SP imm:%i"):format(imm))
+                                 rv32trace(cpu,("r2 == %08X"):format(cpu.regs[2]))
                                  cpu.regs[2] = bit32.band(cpu.regs[2] + imm,4294967295)
-                                 print(("r2 := %08X"):format(cpu.regs[2]))
+                                 rv32trace(cpu,("r2 := %08X"):format(cpu.regs[2]))
                                  valid_instruction = true
                                  goto instruction_legality_determined
                               else
@@ -324,10 +356,10 @@ function rv32.run(cpu, num_cycles)
                                     -- bad instruction!
                                     goto instruction_legality_determined
                                  end
-                                 print(("C.LUI rd:%i imm:%i"):format(rd, imm))
+                                 rv32trace(cpu,("C.LUI rd:%i imm:%i"):format(rd, imm))
                                  if rd ~= 0 then
                                     cpu.regs[rd] = imm
-                                    print(("r%i := %08X"):format(rd, cpu.regs[rd]))
+                                    rv32trace(cpu,("r%i := %08X"):format(rd, cpu.regs[rd]))
                                  end
                                  valid_instruction = true
                                  goto instruction_legality_determined
@@ -347,9 +379,9 @@ function rv32.run(cpu, num_cycles)
                                           goto instruction_legality_determined
                                        end
                                        local amt = bit32.band(bit32.rshift(orig_instruction,2),31)
-                                       print(("C.SRLI rd:%i=%08X shamt:%i"):format(rd, cpu.regs[rd], amt))
+                                       rv32trace(cpu,("C.SRLI rd:%i=%08X shamt:%i"):format(rd, cpu.regs[rd], amt))
                                        cpu.regs[rd] = bit32.rshift(cpu.regs[rd],amt)
-                                       print(("r%i := %08X"):format(rd, cpu.regs[rd]))
+                                       rv32trace(cpu,("r%i := %08X"):format(rd, cpu.regs[rd]))
                                        valid_instruction = true
                                        goto instruction_legality_determined
                                     end
@@ -359,9 +391,9 @@ function rv32.run(cpu, num_cycles)
                                        goto instruction_legality_determined
                                     end
                                     local amt = bit32.band(bit32.rshift(orig_instruction,2),31)
-                                    print(("C.SRAI rd:%i=%08X shamt:%i"):format(rd, cpu.regs[rd], amt))
+                                    rv32trace(cpu,("C.SRAI rd:%i=%08X shamt:%i"):format(rd, cpu.regs[rd], amt))
                                     cpu.regs[rd] = bit32.arshift(cpu.regs[rd],amt)
-                                    print(("r%i := %08X"):format(rd, cpu.regs[rd]))
+                                    rv32trace(cpu,("r%i := %08X"):format(rd, cpu.regs[rd]))
                                     valid_instruction = true
                                     goto instruction_legality_determined
                                  end
@@ -369,16 +401,16 @@ function rv32.run(cpu, num_cycles)
                                  if funct2 <= 2 then
                                     -- ANDI
                                     local imm = bit32.bor(bit32.btest(orig_instruction,4096) and 0xFFFFFFE0 or 0,bit32.lshift(bit32.band(bit32.rshift(orig_instruction,12),1),5),bit32.band(bit32.rshift(orig_instruction,2),31))
-                                    print(("C.ANDI rd:%i=%08X imm=%08X"):format(rd, cpu.regs[rd], imm))
+                                    rv32trace(cpu,("C.ANDI rd:%i=%08X imm=%08X"):format(rd, cpu.regs[rd], imm))
                                     cpu.regs[rd] = bit32.band(cpu.regs[rd],imm)
-                                    print(("r%i := %08X"):format(rd, cpu.regs[rd]))
+                                    rv32trace(cpu,("r%i := %08X"):format(rd, cpu.regs[rd]))
                                     valid_instruction = true
                                     goto instruction_legality_determined
                                  else
                                     -- and the rest~
                                     local op = bit32.band(bit32.rshift(orig_instruction,5),3)
                                     local rs2 = bit32.band(bit32.rshift(orig_instruction,2),7)+8
-                                    print(("C.OP rd:%i=%08X rs2:%i=%08X op:%i"):format(rd, cpu.regs[rd], rs2, cpu.regs[rs2], op))
+                                    rv32trace(cpu,("C.OP rd:%i=%08X rs2:%i=%08X op:%i"):format(rd, cpu.regs[rd], rs2, cpu.regs[rs2], op))
                                     --begin machine generated code (sorry)
                                     if op <= 1 then
                                        if op <= 0 then
@@ -402,7 +434,7 @@ function rv32.run(cpu, num_cycles)
                                     --end machine generated code
 
 
-                                    print(("r%i := %08X"):format(rd, cpu.regs[rd]))
+                                    rv32trace(cpu,("r%i := %08X"):format(rd, cpu.regs[rd]))
                                     valid_instruction = true
                                     goto instruction_legality_determined
                                  end
@@ -424,16 +456,16 @@ function rv32.run(cpu, num_cycles)
                                  if rs1 == 0 then
                                     goto instruction_legality_determined
                                  end
-                                 print(("C.JR rs1=%i:%08X"):format(rs1, cpu.regs[rs1]))
+                                 rv32trace(cpu,("C.JR rs1=%i:%08X"):format(rs1, cpu.regs[rs1]))
                                  new_pc = bit32.band(cpu.regs[rs1],4294967294)
                                  -- we're in C mode so the PC can't misalign
                               else
                                  -- C.MV
                                  -- rs2 cannot be zero
-                                 print(("C.MV rd=%i rs2=%i:%08X"):format(rs1, rs2, cpu.regs[rs2]))
+                                 rv32trace(cpu,("C.MV rd=%i rs2=%i:%08X"):format(rs1, rs2, cpu.regs[rs2]))
                                  if rs1 ~= 0 then
                                     cpu.regs[rs1] = cpu.regs[rs2]
-                                    print(("r%i := %08X"):format(rs1, cpu.regs[rs1]))
+                                    rv32trace(cpu,("r%i := %08X"):format(rs1, cpu.regs[rs1]))
                                  end
                               end
                               valid_instruction = true
@@ -442,11 +474,11 @@ function rv32.run(cpu, num_cycles)
                               if rs1 == 0 then
                                  -- C.EBREAK
                                  instruction = 0x8003B
-                                 print("C.EBREAK")
+                                 rv32trace(cpu,"C.EBREAK")
                               else
                                  -- C.JALR
                                  local destination = cpu.regs[rs1]
-                                 print(("C.JALR rs1:%i=%08X"):format(rs1, destination))
+                                 rv32trace(cpu,("C.JALR rs1:%i=%08X"):format(rs1, destination))
                                  cpu.regs[1] = new_pc
                                  new_pc = bit32.band(destination,4294967294)
                                  -- we're in C mode so the PC can't misalign
@@ -455,7 +487,7 @@ function rv32.run(cpu, num_cycles)
                               end
                            else
                               -- C.ADD
-                              print(("C.ADD rs1:%i=%08X rs2:%i=%08X"):format(rs1, cpu.regs[rs1], rs2, cpu.regs[rs2]))
+                              rv32trace(cpu,("C.ADD rs1:%i=%08X rs2:%i=%08X"):format(rs1, cpu.regs[rs1], rs2, cpu.regs[rs2]))
                               instruction = bit32.bor(0x33,bit32.lshift(rs1,7),bit32.lshift(rs1,15),bit32.lshift(rs2,20))
                            end
                         else
@@ -463,8 +495,8 @@ function rv32.run(cpu, num_cycles)
                               -- C.J
                               local imm = bit32.bor(bit32.btest(orig_instruction,4096) and 0xFFFFF800 or 0,bit32.lshift(bit32.band(bit32.rshift(orig_instruction,12),1),11),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,11),1),4),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,9),3),8),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,8),1),10),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,7),1),6),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,6),1),7),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,3),7),1),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,2),1),5))
                               local target = bit32.band(old_pc + imm,4294967294)
-                              print(("C.J imm=%08X"):format(imm))
-                              print(("pc := %08X"):format(target))
+                              rv32trace(cpu,("C.J imm=%08X"):format(imm))
+                              rv32trace(cpu,("pc := %08X"):format(target))
                               -- we're in C mode so the PC can't misalign
                               new_pc = target
                               valid_instruction = true
@@ -480,14 +512,14 @@ function rv32.run(cpu, num_cycles)
                               local offset = bit32.bor(bit32.lshift(bit32.band(bit32.rshift(orig_instruction,10),7),3),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,6),1),2),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,5),1),6))
                               local rs1 = bit32.band(bit32.rshift(orig_instruction,7),7)+8
                               local rs2 = bit32.band(bit32.rshift(orig_instruction,2),7)+8
-                              print(("C.SW rs1:%i rs2:%i offset:%i"):format(rs1, rs2, offset))
+                              rv32trace(cpu,("C.SW rs1:%i rs2:%i offset:%i"):format(rs1, rs2, offset))
                               instruction = bit32.bor(0x2023,bit32.lshift(rs1,15),bit32.lshift(rs2,20),bit32.lshift(bit32.rshift(offset,5),25),bit32.lshift(bit32.band(offset,31),7))
                            end
                         else
                            -- C.BEQZ
                            local rs1 = bit32.band(bit32.rshift(orig_instruction,7),7)+8
                            local target = bit32.band(old_pc + bit32.bor(bit32.btest(orig_instruction,4096) and 0xFFFFFF00 or 0,bit32.lshift(bit32.band(bit32.rshift(orig_instruction,12),1),8),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,10),3),3),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,5),3),6),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,3),3),1),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,2),1),5)),4294967294)
-                           print(("C.BEQZ rs1=%i:%08X target=%08X"):format(rs1, cpu.regs[rs1], target))
+                           rv32trace(cpu,("C.BEQZ rs1=%i:%08X target=%08X"):format(rs1, cpu.regs[rs1], target))
                            if cpu.regs[rs1] == 0 then
                               local offset = bit32.bor(bit32.btest(orig_instruction,4096) and 0xFFFFFF00 or 0,bit32.lshift(bit32.band(bit32.rshift(orig_instruction,12),1),8),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,10),3),3),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,5),3),6),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,3),3),1),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,2),1),5))
                               new_pc = bit32.band(old_pc + offset,4294967294)
@@ -502,13 +534,13 @@ function rv32.run(cpu, num_cycles)
                            local rd = bit32.band(bit32.rshift(orig_instruction,2),31)
                            local offset = bit32.bor(bit32.lshift(bit32.band(bit32.rshift(orig_instruction,9),15),2),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,7),3),6))
                            instruction = bit32.bor(0x2023,bit32.lshift(rd,20),bit32.lshift(2,15),bit32.lshift(bit32.rshift(offset,5),25),bit32.lshift(bit32.band(offset,31),7))
-                           print(("C.SWSP rd=%i offset=%i"):format(rd, offset))
+                           rv32trace(cpu,("C.SWSP rd=%i offset=%i"):format(rd, offset))
                         else
                            if bitsy == 29 then
                               -- C.BNEZ
                               local rs1 = bit32.band(bit32.rshift(orig_instruction,7),7)+8
                               local target = bit32.band(old_pc + bit32.bor(bit32.btest(orig_instruction,4096) and 0xFFFFFF00 or 0,bit32.lshift(bit32.band(bit32.rshift(orig_instruction,12),1),8),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,10),3),3),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,5),3),6),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,3),3),1),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,2),1),5)),4294967294)
-                              print(("C.BNEZ rs1=%i:%08X target=%08X"):format(rs1, cpu.regs[rs1], target))
+                              rv32trace(cpu,("C.BNEZ rs1=%i:%08X target=%08X"):format(rs1, cpu.regs[rs1], target))
                               if cpu.regs[rs1] ~= 0 then
                                  local offset = bit32.bor(bit32.btest(orig_instruction,4096) and 0xFFFFFF00 or 0,bit32.lshift(bit32.band(bit32.rshift(orig_instruction,12),1),8),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,10),3),3),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,5),3),6),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,3),3),1),bit32.lshift(bit32.band(bit32.rshift(orig_instruction,2),1),5))
                                  new_pc = bit32.band(old_pc + offset,4294967294)
@@ -535,7 +567,7 @@ function rv32.run(cpu, num_cycles)
             goto continue
          end
          local opcode = bit32.band(bit32.rshift(instruction,2),31)
-         --print(opcode)
+         --rv32trace(cpu,opcode)
          --begin machine generated code (sorry)
          if opcode <= 11 then
             if opcode <= 4 then
@@ -549,7 +581,7 @@ function rv32.run(cpu, num_cycles)
                         local imm = bit32.arshift(instruction,20)
                         local funct3 = bit32.band(bit32.rshift(instruction,12),7)
                         local addr = bit32.band(cpu.regs[rs1] + imm,0xFFFFFFFF)
-                        print(("LOAD rs1:%i=%08X imm:%08X funct3:%i addr:%08X"):format(rs1, cpu.regs[rs1], bit32.band(imm,0xFFFFFFFF), funct3, addr))
+                        rv32trace(cpu,("LOAD rs1:%i=%08X imm:%08X funct3:%i addr:%08X"):format(rs1, cpu.regs[rs1], bit32.band(imm,0xFFFFFFFF), funct3, addr))
                         local result
                         --begin machine generated code (sorry)
                         if funct3 <= 1 then
@@ -596,7 +628,7 @@ function rv32.run(cpu, num_cycles)
                         end
                         if result ~= nil then
                            local rd = bit32.band(bit32.rshift(instruction,7),31)
-                           print(("r%i := %08X"):format(rd, result))
+                           rv32trace(cpu,("r%i := %08X"):format(rd, result))
                            if rd ~= 0 then cpu.regs[rd] = result end
                            valid_instruction = true
                         end
@@ -636,7 +668,7 @@ function rv32.run(cpu, num_cycles)
                      local result
                      local funct3 = bit32.band(bit32.rshift(instruction,12),7)
                      local rd = bit32.band(bit32.rshift(instruction,7),31)
-                     print(("OP-I rd:%i rs1:%i=%08X imm:%08X funct3:%i"):format(rd, rs1, a, bit32.band(b,0xFFFFFFFF), funct3))
+                     rv32trace(cpu,("OP-I rd:%i rs1:%i=%08X imm:%08X funct3:%i"):format(rd, rs1, a, bit32.band(b,0xFFFFFFFF), funct3))
                      --begin machine generated code (sorry)
                      if funct3 <= 3 then
                         if funct3 <= 1 then
@@ -689,7 +721,7 @@ function rv32.run(cpu, num_cycles)
                      --end machine generated code
 
                      if result ~= nil then
-                        print(("r%i := %08X"):format(rd, result))
+                        rv32trace(cpu,("r%i := %08X"):format(rd, result))
                         if rd ~= 0 then cpu.regs[rd] = result end
                         valid_instruction = true
                      end
@@ -701,7 +733,7 @@ function rv32.run(cpu, num_cycles)
                      -- auipc = add upper immediate to pc
                      local rd = bit32.band(bit32.rshift(instruction,7),31)
                      local ui = bit32.band(instruction,bit32.bnot(0xFFF))
-                     print(("AUIPC r%i := pc + %08X"):format(rd, bit32.band(ui,0xFFFFFFFF)))
+                     rv32trace(cpu,("AUIPC r%i := pc + %08X"):format(rd, bit32.band(ui,0xFFFFFFFF)))
                      if rd ~= 0 then
                         cpu.regs[rd] = bit32.band(old_pc + ui,0xFFFFFFFF)
                      end
@@ -717,7 +749,7 @@ function rv32.run(cpu, num_cycles)
                         local imm = bit32.bor(bit32.band(bit32.arshift(instruction,20),0xFFFFFFE0),bit32.band(bit32.rshift(instruction,7),31))
                         local funct3 = bit32.band(bit32.rshift(instruction,12),7)
                         local addr = bit32.band(cpu.regs[rs1] + imm,0xFFFFFFFF)
-                        print(("STORE rs1:%i=%08X rs2:%i=%08X imm:%08X funct3:%i addr:%08X"):format(rs1, cpu.regs[rs1], rs2, cpu.regs[rs2], bit32.band(imm,0xFFFFFFFF), funct3, addr))
+                        rv32trace(cpu,("STORE rs1:%i=%08X rs2:%i=%08X imm:%08X funct3:%i addr:%08X"):format(rs1, cpu.regs[rs1], rs2, cpu.regs[rs2], bit32.band(imm,0xFFFFFFFF), funct3, addr))
                         --begin machine generated code (sorry)
                         if funct3 <= 0 then
                            if funct3 == 0 then
@@ -905,7 +937,7 @@ function rv32.run(cpu, num_cycles)
                      local funct3 = bit32.band(bit32.rshift(instruction,12),7)
                      local funct7 = bit32.band(bit32.rshift(instruction,25),127)
                      local rd = bit32.band(bit32.rshift(instruction,7),31)
-                     print(("OP rd:%i rs1:%i=%08X rs2:%i=%08X funct3:%i funct7:%i"):format(rd, rs1, a, rs2, b, funct3, funct7))
+                     rv32trace(cpu,("OP rd:%i rs1:%i=%08X rs2:%i=%08X funct3:%i funct7:%i"):format(rd, rs1, a, rs2, b, funct3, funct7))
                      local funct37 = bit32.bor(bit32.lshift(funct7,3),funct3)
                      --begin machine generated code (sorry)
                      if funct37 <= 8 then
@@ -1126,7 +1158,7 @@ function rv32.run(cpu, num_cycles)
                      --end machine generated code
 
                      if result ~= nil then
-                        print(("r%i := %08X"):format(rd, result))
+                        rv32trace(cpu,("r%i := %08X"):format(rd, result))
                         if rd ~= 0 then cpu.regs[rd] = result end
                         valid_instruction = true
                      end
@@ -1134,7 +1166,7 @@ function rv32.run(cpu, num_cycles)
                      -- lui = load upper immediate
                      local rd = bit32.band(bit32.rshift(instruction,7),31)
                      local ui = bit32.band(instruction,bit32.bnot(0xFFF))
-                     print(("LUI r%i := %08X"):format(rd, bit32.band(ui,0xFFFFFFFF)))
+                     rv32trace(cpu,("LUI r%i := %08X"):format(rd, bit32.band(ui,0xFFFFFFFF)))
                      if rd ~= 0 then
                         cpu.regs[rd] = ui
                      end
@@ -1158,7 +1190,7 @@ function rv32.run(cpu, num_cycles)
                         local b = cpu.regs[rs2]
                         local funct3 = bit32.band(bit32.rshift(instruction,12),7)
                         local should_branch
-                        print(("BRANCH rs1:%i=%08X rs2:%i=%08X funct3:%i imm:%08X"):format(rs1, a, rs2, b, funct3, bit32.bor(bit32.band(bit32.arshift(instruction,19),0xFFFFF000),bit32.lshift(bit32.band(bit32.rshift(instruction,7),1),11),bit32.lshift(bit32.band(bit32.rshift(instruction,25),63),5),bit32.lshift(bit32.band(bit32.rshift(instruction,8),15),1))))
+                        rv32trace(cpu,("BRANCH rs1:%i=%08X rs2:%i=%08X funct3:%i imm:%08X"):format(rs1, a, rs2, b, funct3, bit32.bor(bit32.band(bit32.arshift(instruction,19),0xFFFFF000),bit32.lshift(bit32.band(bit32.rshift(instruction,7),1),11),bit32.lshift(bit32.band(bit32.rshift(instruction,25),63),5),bit32.lshift(bit32.band(bit32.rshift(instruction,8),15),1))))
                         --begin machine generated code (sorry)
                         if funct3 <= 4 then
                            if funct3 <= 0 then
@@ -1208,7 +1240,7 @@ function rv32.run(cpu, num_cycles)
                      local rd = bit32.band(bit32.rshift(instruction,7),31)
                      local rs1 = bit32.band(bit32.rshift(instruction,15),31)
                      local imm = bit32.arshift(instruction,20)
-                     print(("JALR r%i := %08X, rs1:%i=%08X, imm=%08X"):format(rd, cpu.pc, rs1, cpu.regs[rs1], imm))
+                     rv32trace(cpu,("JALR r%i := %08X, rs1:%i=%08X, imm=%08X"):format(rd, cpu.pc, rs1, cpu.regs[rs1], imm))
                      local target=bit32.band(cpu.regs[rs1]+imm,4294967294)
                      if rd ~= 0 then
                         cpu.regs[rd] = new_pc
@@ -1225,7 +1257,7 @@ function rv32.run(cpu, num_cycles)
                         -- jal = jump and link
                         local rd = bit32.band(bit32.rshift(instruction,7),31)
                         local imm = bit32.bor(bit32.band(bit32.arshift(instruction,11),0xFFF00000),bit32.band(instruction,0xFF000),bit32.lshift(bit32.band(bit32.rshift(instruction,20),1),11),bit32.lshift(bit32.band(bit32.rshift(instruction,21),1023),1))
-                        print(("JAL r%i := %08X, imm=%08X"):format(rd, cpu.pc, imm))
+                        rv32trace(cpu,("JAL r%i := %08X, imm=%08X"):format(rd, cpu.pc, imm))
                         if rd ~= 0 then
                            cpu.regs[rd] = new_pc
                         end
@@ -1301,7 +1333,7 @@ function rv32.run(cpu, num_cycles)
                      end
                      --end machine generated code
 
-                     print(("%s csr:%i rd:%i %s:"..rs1format):format(name, csr, rd, rs1name, rs1, cpu.regs[rs1]))
+                     rv32trace(cpu,("%s csr:%i rd:%i %s:"..rs1format):format(name, csr, rd, rs1name, rs1, cpu.regs[rs1]))
                      local wvalue
                      if funct3 >= 4 then
                         -- I variant
@@ -1353,7 +1385,7 @@ function rv32.run(cpu, num_cycles)
                      end
                      if rd ~= 0 and valid_instruction then
                         cpu.regs[rd] = rvalue
-                        print(("r%i := %08X"):format(rd, cpu.regs[rd]))
+                        rv32trace(cpu,("r%i := %08X"):format(rd, cpu.regs[rd]))
                      end
                   else
                      if opcode == 30 then
