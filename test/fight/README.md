@@ -1,0 +1,1 @@
+This program uses `lua-rv32` to emulate a very, very simple machine designed only to run a simple RPG-style battle simulation. It demonstrates basic functionality and usage of `lua-rv32`. It will only run with Lua 5.3 or later.

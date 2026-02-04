@@ -1,0 +1,12 @@
+(require 'package)
+(package-initialize)
+
+(defun format-file ()
+    (lua-mode)
+    (setq require-final-newline t)
+    (setq set-tabs-mode nil)
+    (setq-default indent-tabs-mode nil)
+    (indent-region (point-min) (point-max) nil)
+    (untabify (point-min) (point-max))
+    (save-buffer)
+)
