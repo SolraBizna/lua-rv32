@@ -195,13 +195,15 @@ function rv32.run(cpu, num_cycles)
         do
         cpu.had_exception = nil
         local instruction
+        -----FETCH-----
         if not cpu.c_enabled then
             if $btest(old_pc,3) then
                 error("PC got a misaligned value with C disabled! THIS IS A BUG IN THE EMBEDDING PROGRAM!")
             end
+            -- C disabled: fetch an aligned instruction word
             orig_instruction = cpu:read_word(old_pc, 1)
             if cpu.had_exception then
-                goto continue
+                goto abort_instruction
             end
             instruction = orig_instruction
             new_pc = old_pc + 4
@@ -216,21 +218,25 @@ function rv32.run(cpu, num_cycles)
             }
         else
             if $btest(old_pc,2) then
+                -- C enabled, PC half-aligned; start by reading one halfword...
                 orig_instruction = cpu:read_halfword(old_pc, 1)
                 if cpu.had_exception then
-                    goto continue
+                    goto abort_instruction
                 end
                 if $band(orig_instruction,3) == 3 then
+                    -- ..and if it's the lower half of a 32-bit instruction,
+                    -- read the other half.
                     cost = cost + 1
                     orig_instruction = $bor(orig_instruction, $lshift(cpu:read_halfword(old_pc+2,true),16))
                     if cpu.had_exception then
-                        goto continue
+                        goto abort_instruction
                     end
                 end
             else
+                -- C enabled, PC full-aligned. Always read a whole word.
                 orig_instruction = cpu:read_word(old_pc, 1)
                 if cpu.had_exception then
-                    goto continue
+                    goto abort_instruction
                 end
             end
             %trace() {
@@ -243,17 +249,24 @@ function rv32.run(cpu, num_cycles)
                 rv32trace(cpu,false)
             }
             if $band(orig_instruction,3) == 3 then
+                -- 32-bit instruction
                 new_pc = old_pc + 4
                 instruction = orig_instruction
             else
+                -- 16-bit instruction... try to either decode it into its
+                -- equivalent 32-bit instruction, OR execute it directly if
+                -- that would be awkward.
                 new_pc = old_pc + 2
                 orig_instruction = $band(orig_instruction, 0xFFFF)
+                -- Extract a scrambled operation code...
                 local bitsy = $disassemble(orig_instruction, 15..13->2, 1..0->0)
                 %select(bitsy){
                     0 => {
                         -- C.ADDI4SPN (add unsigned immediate to stack pointer)
                         local offset = $disassemble(orig_instruction, 12..11->4, 10..7->6, 6..6->2, 5..5->3)
                         if offset == 0 then
+                            -- ADDI4SPN with zero offset is nonsense and
+                            -- therefore illegal
                             goto instruction_legality_determined
                         end
                         local rd = $extract(orig_instruction, 2, 3)+8
@@ -378,6 +391,7 @@ function rv32.run(cpu, num_cycles)
                             0 => {
                                 -- SRLI
                                 if $btest(orig_instruction, 0x1000) then
+                                    -- illegal bit pattern
                                     goto instruction_legality_determined
                                 end
                                 local amt = $extract(orig_instruction, 2, 5)
@@ -394,6 +408,7 @@ function rv32.run(cpu, num_cycles)
                             1 => {
                                 -- SRAI
                                 if $btest(orig_instruction, 0x1000) then
+                                    -- illegal bit pattern
                                     goto instruction_legality_determined
                                 end
                                 local amt = $extract(orig_instruction, 2, 5)
@@ -455,6 +470,7 @@ function rv32.run(cpu, num_cycles)
                     }
                     21 => {
                         -- C.J
+                        -- oh, ye gods!
                         local imm = $disassemble(orig_instruction, ~12..12->11, 11..11->4, 10..9->8, 8..8->10, 7..7->6, 6..6->7, 5..3->1, 2..2->5)
                         local target = $band(old_pc + imm, $bnot(1))
                         %trace(){
@@ -499,6 +515,7 @@ function rv32.run(cpu, num_cycles)
                     2 => {
                         -- C.SLLI
                         if $btest(orig_instruction, 0x1000) then
+                            -- illegal bit pattern
                             goto instruction_legality_determined
                         end
                         local amt = $extract(orig_instruction, 2, 5)
@@ -598,14 +615,15 @@ function rv32.run(cpu, num_cycles)
                 end
             end
         end
-        -- if we get here with a C instruction, it failed to decompress
-        -- this check should only be reachable outside of C mode
+        -- if we get here in C mode, we had a full-size instruction OR we
+        -- decompressed a half-size instruction into a full-size one
         if $band(instruction,3) ~= 3 then
             cpu:exception(rv32.EXC_ILLEGAL_INSTRUCTION, orig_instruction)
-            goto continue
+            goto abort_instruction
         end
+        -----EXECUTE-----
+        -- (some 16-bit instructions will have been executed above)
         local opcode = $extract(instruction, 2, 5)
-        --rv32trace(cpu,opcode)
         %select(opcode){
             0 => {
 -- load
@@ -622,7 +640,7 @@ local result
 %select(funct3){
     0 => {
         result = cpu:read_byte(addr)
-        if cpu.had_exception then goto continue end
+        if cpu.had_exception then goto abort_instruction end
         result = $sex8(result)
     }
     1 => {
@@ -630,7 +648,7 @@ local result
             cost = cost + 1
         end
         result = cpu:read_halfword(addr)
-        if cpu.had_exception then goto continue end
+        if cpu.had_exception then goto abort_instruction end
         result = $sex16(result)
     }
     2 => {
@@ -638,22 +656,22 @@ local result
             cost = cost + 1
         end
         result = cpu:read_word(addr)
-        if cpu.had_exception then goto continue end
+        if cpu.had_exception then goto abort_instruction end
     }
     4 => {
         result = cpu:read_byte(addr)
-        if cpu.had_exception then goto continue end
+        if cpu.had_exception then goto abort_instruction end
     }
     5 => {
         if $band(addr,3) == 3 then
             cost = cost + 1
         end
         result = cpu:read_halfword(addr)
-        if cpu.had_exception then goto continue end
+        if cpu.had_exception then goto abort_instruction end
     }
 }
 if cpu.had_exception then
-    goto continue
+    goto abort_instruction
 end
 if result ~= nil then
     local rd = $rd(instruction)
@@ -772,7 +790,7 @@ rv32trace(cpu,("STORE rs1:%i=%08X rs2:%i=%08X imm:%08X funct3:%i addr:%08X"):for
 %select(funct3){
     0 => {
         cpu:write_byte(addr, $band(value,255))
-        if cpu.had_exception then goto continue end
+        if cpu.had_exception then goto abort_instruction end
         valid_instruction = true
     }
     1 => {
@@ -780,7 +798,7 @@ rv32trace(cpu,("STORE rs1:%i=%08X rs2:%i=%08X imm:%08X funct3:%i addr:%08X"):for
             cost = cost + 1
         end
         cpu:write_halfword(addr, $band(value,65535))
-        if cpu.had_exception then goto continue end
+        if cpu.had_exception then goto abort_instruction end
         valid_instruction = true
     }
     2 => {
@@ -788,12 +806,12 @@ rv32trace(cpu,("STORE rs1:%i=%08X rs2:%i=%08X imm:%08X funct3:%i addr:%08X"):for
             cost = cost + 1
         end
         cpu:write_word(addr, value, 0xFFFFFFFF)
-        if cpu.had_exception then goto continue end
+        if cpu.had_exception then goto abort_instruction end
         valid_instruction = true
     }
 }
 if cpu.had_exception then
-    goto continue
+    goto abort_instruction
 end
             }
             -- 9 => store (floating point)
@@ -812,7 +830,7 @@ end
                 local addr = cpu.regs[rs1]
                 if $btest(addr,3) then
                     cpu:exception(rv32.EXC_MISALIGNED_STORE, addr)
-                    goto continue
+                    goto abort_instruction
                 end
                 if funct5 ~= 3 then
                     -- no AMO operation other than SC will ever preserve the
@@ -827,7 +845,7 @@ end
                         if rs2 ~= 0 then goto bad_amo end
                         local value = cpu:read_word(addr)
                         if cpu.had_exception then
-                            goto continue
+                            goto abort_instruction
                         end
                         if rd ~= 0 then
                             cpu.regs[rd] = value
@@ -840,7 +858,7 @@ end
                         if addr == cpu.reserved_address then
                             local value = cpu.regs[rs2]
                             cpu:write_word(addr, value, 0xFFFFFFFF)
-                            if cpu.had_exception then goto continue end
+                            if cpu.had_exception then goto abort_instruction end
                             if rd ~= 0 then
                                 cpu.regs[rd] = 0
                             end
@@ -885,13 +903,13 @@ end
                 if amo_op then
                     local mem_value = cpu:read_word(addr, 7)
                     if cpu.had_exception then
-                        goto continue
+                        goto abort_instruction
                     end
                     local reg_value = cpu.regs[rs2]
                     local write_value = amo_op(mem_value, reg_value)
                     cpu:write_word(addr, write_value, 0xFFFFFFFF)
                     if cpu.had_exception then
-                        goto continue
+                        goto abort_instruction
                     end
                     if rd ~= 0 then
                         cpu.regs[rd] = mem_value
@@ -1213,7 +1231,7 @@ if should_branch then
     local target = $band(old_pc + imm, $bnot(1))
     if not cpu.c_enabled and $btest(target,2) then
         cpu:exception(rv32.EXC_MISALIGNED_PC, target)
-        goto continue
+        goto abort_instruction
     else
         new_pc = target
     end
@@ -1233,7 +1251,7 @@ if rd ~= 0 then
 end
 if not cpu.c_enabled and $btest(target,2) then
     cpu:exception(rv32.EXC_MISALIGNED_PC, target)
-    goto continue
+    goto abort_instruction
 else
     new_pc = target
 end
@@ -1246,15 +1264,15 @@ local rd = $rd(instruction)
 local imm = $immJ(instruction)%trace(){
 rv32trace(cpu,("JAL r%i := %08X, imm=%08X"):format(rd, cpu.pc, imm))
 }
-if rd ~= 0 then
-    cpu.regs[rd] = new_pc
-end
 local target = $band(old_pc + imm, $bnot(1))
 if not cpu.c_enabled and $btest(target,2) then
     cpu:exception(rv32.EXC_MISALIGNED_PC, target)
-    goto continue
+    goto abort_instruction
 else
     new_pc = target
+end
+if rd ~= 0 then
+    cpu.regs[rd] = new_pc
 end
 valid_instruction = true
             }
@@ -1268,7 +1286,7 @@ valid_instruction = true
                         if cpu.execute_ecall then
                             cost = cost + (cpu:execute_ecall() or 0)
                             if cpu.had_exception then
-                                goto continue
+                                goto abort_instruction
                             end
                             valid_instruction = true
                         end
@@ -1276,7 +1294,7 @@ valid_instruction = true
                         if cpu.execute_ebreak then
                             cost = cost + (cpu:execute_ebreak() or 0)
                             if cpu.had_exception then
-                                goto continue
+                                goto abort_instruction
                             end
                             valid_instruction = true
                         end
@@ -1315,7 +1333,7 @@ valid_instruction = true
                 if rd ~= 0 or funct2 ~= 1 then
                     rvalue = cpu:read_csr(csr)
                     if cpu.had_exception then
-                        goto continue
+                        goto abort_instruction
                     end
                     if rvalue == nil then
                         goto instruction_legality_determined
@@ -1346,7 +1364,7 @@ valid_instruction = true
                     }
                 }
                 if cpu.had_exception then
-                    goto continue
+                    goto abort_instruction
                 end
                 if rd ~= 0 and valid_instruction then
                     cpu.regs[rd] = rvalue
@@ -1361,28 +1379,28 @@ valid_instruction = true
             2 => {
                 if cpu.execute_custom0 then
                     cost = cost + cpu:execute_custom0(instruction) or 0
-                    if cpu.had_exception then goto continue end
+                    if cpu.had_exception then goto abort_instruction end
                     valid_instruction = true
                 end
             }
             10 => {
                 if cpu.execute_custom1 then
                     cost = cost + cpu:execute_custom1(instruction) or 0
-                    if cpu.had_exception then goto continue end
+                    if cpu.had_exception then goto abort_instruction end
                     valid_instruction = true
                 end
             }
             22 => {
                 if cpu.execute_custom2 then
                     cost = cost + cpu:execute_custom2(instruction) or 0
-                    if cpu.had_exception then goto continue end
+                    if cpu.had_exception then goto abort_instruction end
                     valid_instruction = true
                 end
             }
             30 => {
                 if cpu.execute_custom3 then
                     cost = cost + cpu:execute_custom3(instruction) or 0
-                    if cpu.had_exception then goto continue end
+                    if cpu.had_exception then goto abort_instruction end
                     valid_instruction = true
                 end
             }
@@ -1399,7 +1417,7 @@ valid_instruction = true
             cpu.instret_hi = (cpu.instret_hi + 1) % 0x100000000
         end
     end
-    ::continue::
+    ::abort_instruction::
         cpu.budget = cpu.budget - cost
     until cpu.budget <= 0
 end

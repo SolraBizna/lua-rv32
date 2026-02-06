@@ -169,41 +169,52 @@ function rv32.run(cpu, num_cycles)
       do
          cpu.had_exception = nil
          local instruction
+         -----FETCH-----
          if not cpu.c_enabled then
             if (((old_pc) & (3)) ~= 0) then
                error("PC got a misaligned value with C disabled! THIS IS A BUG IN THE EMBEDDING PROGRAM!")
             end
+            -- C disabled: fetch an aligned instruction word
             orig_instruction = cpu:read_word(old_pc, 1)
             if cpu.had_exception then
-               goto continue
+               goto abort_instruction
             end
             instruction = orig_instruction
             new_pc = old_pc + 4
          else
             if (((old_pc) & (2)) ~= 0) then
+               -- C enabled, PC half-aligned; start by reading one halfword...
                orig_instruction = cpu:read_halfword(old_pc, 1)
                if cpu.had_exception then
-                  goto continue
+                  goto abort_instruction
                end
                if ((orig_instruction) & (3)) == 3 then
+                  -- ..and if it's the lower half of a 32-bit instruction,
+                  -- read the other half.
                   cost = cost + 1
                   orig_instruction = ((orig_instruction)|((((cpu:read_halfword(old_pc+2,true)) << (16)) & 0xFFFFFFFF)))
                   if cpu.had_exception then
-                     goto continue
+                     goto abort_instruction
                   end
                end
             else
+               -- C enabled, PC full-aligned. Always read a whole word.
                orig_instruction = cpu:read_word(old_pc, 1)
                if cpu.had_exception then
-                  goto continue
+                  goto abort_instruction
                end
             end
             if ((orig_instruction) & (3)) == 3 then
+               -- 32-bit instruction
                new_pc = old_pc + 4
                instruction = orig_instruction
             else
+               -- 16-bit instruction... try to either decode it into its
+               -- equivalent 32-bit instruction, OR execute it directly if
+               -- that would be awkward.
                new_pc = old_pc + 2
                orig_instruction = ((orig_instruction) & (0xFFFF))
+               -- Extract a scrambled operation code...
                local bitsy = (((((((((orig_instruction) >> (13))) & (7))) << (2)) & 0xFFFFFFFF))|(((((orig_instruction) >> (0))) & (3))))
                --begin machine generated code (sorry)
                if bitsy <= 10 then
@@ -213,6 +224,8 @@ function rv32.run(cpu, num_cycles)
                            -- C.ADDI4SPN (add unsigned immediate to stack pointer)
                            local offset = (((((((((orig_instruction) >> (11))) & (3))) << (4)) & 0xFFFFFFFF))|((((((((orig_instruction) >> (7))) & (15))) << (6)) & 0xFFFFFFFF))|((((((((orig_instruction) >> (6))) & (1))) << (2)) & 0xFFFFFFFF))|((((((((orig_instruction) >> (5))) & (1))) << (3)) & 0xFFFFFFFF)))
                            if offset == 0 then
+                              -- ADDI4SPN with zero offset is nonsense and
+                              -- therefore illegal
                               goto instruction_legality_determined
                            end
                            local rd = ((((orig_instruction) >> (2))) & (7))+8
@@ -233,6 +246,7 @@ function rv32.run(cpu, num_cycles)
                         else
                            -- C.SLLI
                            if (((orig_instruction) & (0x1000)) ~= 0) then
+                              -- illegal bit pattern
                               goto instruction_legality_determined
                            end
                            local amt = ((((orig_instruction) >> (2))) & (31))
@@ -324,6 +338,7 @@ function rv32.run(cpu, num_cycles)
                                     if funct2 == 0 then
                                        -- SRLI
                                        if (((orig_instruction) & (0x1000)) ~= 0) then
+                                          -- illegal bit pattern
                                           goto instruction_legality_determined
                                        end
                                        local amt = ((((orig_instruction) >> (2))) & (31))
@@ -334,6 +349,7 @@ function rv32.run(cpu, num_cycles)
                                  else
                                     -- SRAI
                                     if (((orig_instruction) & (0x1000)) ~= 0) then
+                                       -- illegal bit pattern
                                        goto instruction_legality_determined
                                     end
                                     local amt = ((((orig_instruction) >> (2))) & (31))
@@ -427,6 +443,7 @@ function rv32.run(cpu, num_cycles)
                         else
                            if bitsy == 21 then
                               -- C.J
+                              -- oh, ye gods!
                               local imm = (((((orig_instruction) & (4096)) ~= 0) and 0xFFFFF800 or 0)|((((((((orig_instruction) >> (12))) & (1))) << (11)) & 0xFFFFFFFF))|((((((((orig_instruction) >> (11))) & (1))) << (4)) & 0xFFFFFFFF))|((((((((orig_instruction) >> (9))) & (3))) << (8)) & 0xFFFFFFFF))|((((((((orig_instruction) >> (8))) & (1))) << (10)) & 0xFFFFFFFF))|((((((((orig_instruction) >> (7))) & (1))) << (6)) & 0xFFFFFFFF))|((((((((orig_instruction) >> (6))) & (1))) << (7)) & 0xFFFFFFFF))|((((((((orig_instruction) >> (3))) & (7))) << (1)) & 0xFFFFFFFF))|((((((((orig_instruction) >> (2))) & (1))) << (5)) & 0xFFFFFFFF)))
                               local target = ((old_pc + imm) & (4294967294))
                               -- we're in C mode so the PC can't misalign
@@ -486,14 +503,15 @@ function rv32.run(cpu, num_cycles)
                end
             end
          end
-         -- if we get here with a C instruction, it failed to decompress
-         -- this check should only be reachable outside of C mode
+         -- if we get here in C mode, we had a full-size instruction OR we
+         -- decompressed a half-size instruction into a full-size one
          if ((instruction) & (3)) ~= 3 then
             cpu:exception(rv32.EXC_ILLEGAL_INSTRUCTION, orig_instruction)
-            goto continue
+            goto abort_instruction
          end
+         -----EXECUTE-----
+         -- (some 16-bit instructions will have been executed above)
          local opcode = ((((instruction) >> (2))) & (31))
-         --rv32trace(cpu,opcode)
          --begin machine generated code (sorry)
          if opcode <= 11 then
             if opcode <= 4 then
@@ -513,7 +531,7 @@ function rv32.run(cpu, num_cycles)
                            if funct3 <= 0 then
                               if funct3 == 0 then
                                  result = cpu:read_byte(addr)
-                                 if cpu.had_exception then goto continue end
+                                 if cpu.had_exception then goto abort_instruction end
                                  result = ((result)|((((result) & (0x80)) ~= 0) and 0xFFFFFF00 or 0))
                               end
                            else
@@ -521,7 +539,7 @@ function rv32.run(cpu, num_cycles)
                                  cost = cost + 1
                               end
                               result = cpu:read_halfword(addr)
-                              if cpu.had_exception then goto continue end
+                              if cpu.had_exception then goto abort_instruction end
                               result = ((result)|((((result) & (0x8000)) ~= 0) and 0xFFFF0000 or 0))
                            end
                         else
@@ -530,26 +548,26 @@ function rv32.run(cpu, num_cycles)
                                  cost = cost + 1
                               end
                               result = cpu:read_word(addr)
-                              if cpu.had_exception then goto continue end
+                              if cpu.had_exception then goto abort_instruction end
                            else
                               if funct3 <= 4 then
                                  if funct3 == 4 then
                                     result = cpu:read_byte(addr)
-                                    if cpu.had_exception then goto continue end
+                                    if cpu.had_exception then goto abort_instruction end
                                  end
                               else
                                  if ((addr) & (3)) == 3 then
                                     cost = cost + 1
                                  end
                                  result = cpu:read_halfword(addr)
-                                 if cpu.had_exception then goto continue end
+                                 if cpu.had_exception then goto abort_instruction end
                               end
                            end
                         end
                         --end machine generated code
 
                         if cpu.had_exception then
-                           goto continue
+                           goto abort_instruction
                         end
                         if result ~= nil then
                            local rd = ((((instruction) >> (7))) & (31))
@@ -561,7 +579,7 @@ function rv32.run(cpu, num_cycles)
                      if opcode == 2 then
                         if cpu.execute_custom0 then
                            cost = cost + cpu:execute_custom0(instruction) or 0
-                           if cpu.had_exception then goto continue end
+                           if cpu.had_exception then goto abort_instruction end
                            valid_instruction = true
                         end
                      end
@@ -674,7 +692,7 @@ function rv32.run(cpu, num_cycles)
                         if funct3 <= 0 then
                            if funct3 == 0 then
                               cpu:write_byte(addr, ((value) & (255)))
-                              if cpu.had_exception then goto continue end
+                              if cpu.had_exception then goto abort_instruction end
                               valid_instruction = true
                            end
                         else
@@ -683,21 +701,21 @@ function rv32.run(cpu, num_cycles)
                                  cost = cost + 1
                               end
                               cpu:write_halfword(addr, ((value) & (65535)))
-                              if cpu.had_exception then goto continue end
+                              if cpu.had_exception then goto abort_instruction end
                               valid_instruction = true
                            else
                               if (((addr) & (3)) ~= 0) then
                                  cost = cost + 1
                               end
                               cpu:write_word(addr, value, 0xFFFFFFFF)
-                              if cpu.had_exception then goto continue end
+                              if cpu.had_exception then goto abort_instruction end
                               valid_instruction = true
                            end
                         end
                         --end machine generated code
 
                         if cpu.had_exception then
-                           goto continue
+                           goto abort_instruction
                         end
                      end
                   end
@@ -706,7 +724,7 @@ function rv32.run(cpu, num_cycles)
                      if opcode == 10 then
                         if cpu.execute_custom1 then
                            cost = cost + cpu:execute_custom1(instruction) or 0
-                           if cpu.had_exception then goto continue end
+                           if cpu.had_exception then goto abort_instruction end
                            valid_instruction = true
                         end
                      end
@@ -724,7 +742,7 @@ function rv32.run(cpu, num_cycles)
                         local addr = cpu.regs[rs1]
                         if (((addr) & (3)) ~= 0) then
                            cpu:exception(rv32.EXC_MISALIGNED_STORE, addr)
-                           goto continue
+                           goto abort_instruction
                         end
                         if funct5 ~= 3 then
                            -- no AMO operation other than SC will ever preserve the
@@ -748,7 +766,7 @@ function rv32.run(cpu, num_cycles)
                                  if rs2 ~= 0 then goto bad_amo end
                                  local value = cpu:read_word(addr)
                                  if cpu.had_exception then
-                                    goto continue
+                                    goto abort_instruction
                                  end
                                  if rd ~= 0 then
                                     cpu.regs[rd] = value
@@ -761,7 +779,7 @@ function rv32.run(cpu, num_cycles)
                                     if addr == cpu.reserved_address then
                                        local value = cpu.regs[rs2]
                                        cpu:write_word(addr, value, 0xFFFFFFFF)
-                                       if cpu.had_exception then goto continue end
+                                       if cpu.had_exception then goto abort_instruction end
                                        if rd ~= 0 then
                                           cpu.regs[rd] = 0
                                        end
@@ -824,13 +842,13 @@ function rv32.run(cpu, num_cycles)
                         if amo_op then
                            local mem_value = cpu:read_word(addr, 7)
                            if cpu.had_exception then
-                              goto continue
+                              goto abort_instruction
                            end
                            local reg_value = cpu.regs[rs2]
                            local write_value = amo_op(mem_value, reg_value)
                            cpu:write_word(addr, write_value, 0xFFFFFFFF)
                            if cpu.had_exception then
-                              goto continue
+                              goto abort_instruction
                            end
                            if rd ~= 0 then
                               cpu.regs[rd] = mem_value
@@ -1035,7 +1053,7 @@ function rv32.run(cpu, num_cycles)
                      if opcode == 22 then
                         if cpu.execute_custom2 then
                            cost = cost + cpu:execute_custom2(instruction) or 0
-                           if cpu.had_exception then goto continue end
+                           if cpu.had_exception then goto abort_instruction end
                            valid_instruction = true
                         end
                      end
@@ -1082,7 +1100,7 @@ function rv32.run(cpu, num_cycles)
                            local target = ((old_pc + imm) & (4294967294))
                            if not cpu.c_enabled and (((target) & (2)) ~= 0) then
                               cpu:exception(rv32.EXC_MISALIGNED_PC, target)
-                              goto continue
+                              goto abort_instruction
                            else
                               new_pc = target
                            end
@@ -1103,7 +1121,7 @@ function rv32.run(cpu, num_cycles)
                      end
                      if not cpu.c_enabled and (((target) & (2)) ~= 0) then
                         cpu:exception(rv32.EXC_MISALIGNED_PC, target)
-                        goto continue
+                        goto abort_instruction
                      else
                         new_pc = target
                      end
@@ -1113,15 +1131,15 @@ function rv32.run(cpu, num_cycles)
                         -- jal = jump and link
                         local rd = ((((instruction) >> (7))) & (31))
                         local imm = ((((((((instruction) >> (11)) | ((((instruction) & (0x80000000)) ~= 0) and (0xFFFFFFFF << (32-(11))) or 0)) & 0xFFFFFFFF)) & (0xFFF00000)))|(((instruction) & (0xFF000)))|((((((((instruction) >> (20))) & (1))) << (11)) & 0xFFFFFFFF))|((((((((instruction) >> (21))) & (1023))) << (1)) & 0xFFFFFFFF)))
-                        if rd ~= 0 then
-                           cpu.regs[rd] = new_pc
-                        end
                         local target = ((old_pc + imm) & (4294967294))
                         if not cpu.c_enabled and (((target) & (2)) ~= 0) then
                            cpu:exception(rv32.EXC_MISALIGNED_PC, target)
-                           goto continue
+                           goto abort_instruction
                         else
                            new_pc = target
+                        end
+                        if rd ~= 0 then
+                           cpu.regs[rd] = new_pc
                         end
                         valid_instruction = true
                      end
@@ -1137,7 +1155,7 @@ function rv32.run(cpu, num_cycles)
                            if cpu.execute_ecall then
                               cost = cost + (cpu:execute_ecall() or 0)
                               if cpu.had_exception then
-                                 goto continue
+                                 goto abort_instruction
                               end
                               valid_instruction = true
                            end
@@ -1145,7 +1163,7 @@ function rv32.run(cpu, num_cycles)
                            if cpu.execute_ebreak then
                               cost = cost + (cpu:execute_ebreak() or 0)
                               if cpu.had_exception then
-                                 goto continue
+                                 goto abort_instruction
                               end
                               valid_instruction = true
                            end
@@ -1172,7 +1190,7 @@ function rv32.run(cpu, num_cycles)
                      if rd ~= 0 or funct2 ~= 1 then
                         rvalue = cpu:read_csr(csr)
                         if cpu.had_exception then
-                           goto continue
+                           goto abort_instruction
                         end
                         if rvalue == nil then
                            goto instruction_legality_determined
@@ -1206,7 +1224,7 @@ function rv32.run(cpu, num_cycles)
                      --end machine generated code
 
                      if cpu.had_exception then
-                        goto continue
+                        goto abort_instruction
                      end
                      if rd ~= 0 and valid_instruction then
                         cpu.regs[rd] = rvalue
@@ -1215,7 +1233,7 @@ function rv32.run(cpu, num_cycles)
                      if opcode == 30 then
                         if cpu.execute_custom3 then
                            cost = cost + cpu:execute_custom3(instruction) or 0
-                           if cpu.had_exception then goto continue end
+                           if cpu.had_exception then goto abort_instruction end
                            valid_instruction = true
                         end
                      end
@@ -1237,7 +1255,7 @@ function rv32.run(cpu, num_cycles)
             cpu.instret_hi = (cpu.instret_hi + 1) % 0x100000000
          end
       end
-      ::continue::
+      ::abort_instruction::
       cpu.budget = cpu.budget - cost
    until cpu.budget <= 0
 end
