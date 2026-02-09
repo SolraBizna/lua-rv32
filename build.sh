@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 emacs=
 for maybemacs in emacs-nox emacs; do
