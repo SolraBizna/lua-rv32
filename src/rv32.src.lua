@@ -158,7 +158,7 @@ end
 
 function rv32.read_halfword(cpu, addr, exception_type)
     if cpu.strict_alignment and $btest(addr,1) then
-        return cpu:exception(rv32.EXC_MISALIGNED_LOAD)
+        return cpu:exception(rv32.EXC_MISALIGNED_LOAD, addr)
     elseif $band(addr,3) == 3 then
         return $bor(cpu:read_byte(addr), $lshift(cpu:read_byte($band(addr+1,0xFFFFFFFF)), 8))
     else
@@ -170,7 +170,7 @@ end
 
 function rv32.write_halfword(cpu, addr, value)
     if cpu.strict_alignment and $btest(addr,1) then
-        return cpu:exception(rv32.EXC_MISALIGNED_STORE)
+        return cpu:exception(rv32.EXC_MISALIGNED_STORE, addr)
     elseif $band(addr,3) == 3 then
         cpu:write_byte(addr, $band(value,255))
         cpu:write_byte(addr+1, $rshift(value,8))
@@ -186,7 +186,7 @@ function rv32.run(cpu, num_cycles)
     else
         cpu.budget = 1
     end
-    repeat
+    while cpu.budget > 0 do
         local cost = 1
         local valid_instruction = false
         local orig_instruction
@@ -1419,7 +1419,7 @@ valid_instruction = true
     end
     ::abort_instruction::
         cpu.budget = cpu.budget - cost
-    until cpu.budget <= 0
+    end
 end
 
 return rv32

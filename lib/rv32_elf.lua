@@ -157,7 +157,6 @@ function rv32_elf.load(elf, params)\
       if not raw_strtab then\
          return nil, \"unable to read the string table within the ELF\"\
       end\
-      local symbols = {}\
       if not elf:seek(\"set\", symtab_header.sh_offset) then\
          return nil, \"unable to seek to the symbol table within the ELF\"\
       end\
@@ -329,7 +328,6 @@ function rv32_elf.load(elf, params)\
       if not raw_strtab then\
          return nil, \"unable to read the string table within the ELF\"\
       end\
-      local symbols = {}\
       if not elf:seek(\"set\", symtab_header.sh_offset) then\
          return nil, \"unable to seek to the symbol table within the ELF\"\
       end\
