@@ -1214,6 +1214,7 @@ function rv32.run(cpu, num_cycles)
                   else
                      if opcode == 27 then
                         -- jal = jump and link
+                        local old_new_pc = new_pc
                         local rd = ((((instruction) >> (7))) & (31))
                         local imm = ((((((((instruction) >> (11)) | ((((instruction) & (0x80000000)) ~= 0) and (0xFFFFFFFF << (32-(11))) or 0)) & 0xFFFFFFFF)) & (0xFFF00000)))|(((instruction) & (0xFF000)))|((((((((instruction) >> (20))) & (1))) << (11)) & 0xFFFFFFFF))|((((((((instruction) >> (21))) & (1023))) << (1)) & 0xFFFFFFFF)))
                         rv32trace(cpu,("JAL r%i := %08X, imm=%08X"):format(rd, cpu.pc, imm))
@@ -1225,7 +1226,7 @@ function rv32.run(cpu, num_cycles)
                            new_pc = target
                         end
                         if rd ~= 0 then
-                           cpu.regs[rd] = new_pc
+                           cpu.regs[rd] = old_new_pc
                         end
                         valid_instruction = true
                      end

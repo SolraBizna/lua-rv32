@@ -1260,6 +1260,7 @@ valid_instruction = true
             -- 26 => reserved
             27 => {
 -- jal = jump and link
+local old_new_pc = new_pc
 local rd = $rd(instruction)
 local imm = $immJ(instruction)%trace(){
 rv32trace(cpu,("JAL r%i := %08X, imm=%08X"):format(rd, cpu.pc, imm))
@@ -1272,7 +1273,7 @@ else
     new_pc = target
 end
 if rd ~= 0 then
-    cpu.regs[rd] = new_pc
+    cpu.regs[rd] = old_new_pc
 end
 valid_instruction = true
             }
